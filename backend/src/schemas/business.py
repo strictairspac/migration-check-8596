@@ -25,4 +25,8 @@ class MappingInput(BaseModel):
 class RunInput(BaseModel):
  name:str=Field(min_length=2,max_length=120)
  mapping_id:int
+class AcceptanceInput(BaseModel):
+ acceptance_no:str=Field(min_length=3,max_length=80)
+ name:str=Field(min_length=2,max_length=120)
+ mapping_id:int
 class RestoreInput(BaseModel):backup:dict

@@ -1,5 +1,5 @@
 from src.config.database import Base,engine,Session
-from src.models.identity import User,Audit
+from src.models.identity import User
 from src.models.batch import Batch
 from src.models.mapping import Mapping
 from src.models.run import Run,TargetRow

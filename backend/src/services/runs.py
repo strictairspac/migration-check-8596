@@ -1,14 +1,10 @@
-import redis
 from datetime import datetime,timezone
 from fastapi import HTTPException
 from src.config.database import Session
-from src.config.settings import REDIS_URL
-from src.models.batch import Batch
-from src.models.mapping import Mapping
-from src.models.run import Run,TargetRow
+from src.models.run import Run,TargetRow,Acceptance
 from src.utils.serialization import record
 from src.services.migration import digest,key_digest,validate_backup
-queue=redis.Redis.from_url(REDIS_URL)
+from src.services import acceptances
 def list_items():
  with Session() as s:return [record(r) for r in s.query(Run).order_by(Run.id.desc()).limit(100).all()]
 def detail(item_id):
@@ -17,25 +13,15 @@ def detail(item_id):
   if not r:raise HTTPException(404,'未找到对账运行')
   return record(r)
 def create(data):
- with Session() as s:
-  m=s.get(Mapping,data.mapping_id)
-  if not m:raise HTTPException(404,'未找到字段映射')
-  b=s.get(Batch,m.batch_id)
-  r=Run(name=data.name,batch_id=b.id,mapping_id=m.id,status='queued',snapshot={'batch':record(b),'mapping':record(m)})
-  s.add(r);s.commit();s.refresh(r);result=record(r)
- try:queue.rpush('migration-runs',result['id'])
- except redis.RedisError:
-  with Session() as s:r=s.get(Run,result['id']);r.status='failed';r.error='队列不可用，请创建新任务';s.commit()
-  raise HTTPException(503,'队列不可用，请稍后重试')
- return result
+ # 兼容旧入口：统一走可靠受理，受理号由运行名派生保证可重放
+ class _A:pass
+ payload=_A();payload.acceptance_no='A-'+digest(data.name)[:24];payload.name=data.name;payload.mapping_id=data.mapping_id
+ return acceptances.create(payload)
 def cancel(item_id):
  with Session() as s:
-  r=s.query(Run).filter_by(id=item_id).with_for_update().first()
-  if not r:raise HTTPException(404,'未找到对账运行')
-  if r.status not in ('queued','running'):raise HTTPException(409,'运行已终止，无法取消')
-  r.cancel_requested=True
-  if r.status=='queued':r.status='cancelled'
-  s.commit();return record(r)
+  a=s.query(Acceptance).filter_by(run_id=item_id).with_for_update().first()
+ if not a:raise HTTPException(404,'未找到受理记录')
+ return acceptances.cancel(a.id)
 def targets(item_id):
  detail(item_id)
  with Session() as s:rows=[r.payload for r in s.query(TargetRow).filter_by(run_id=item_id).order_by(TargetRow.ordinal)]

@@ -3,8 +3,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy import text
 from src.config.database import engine
-from src.services.runs import queue
-from src.routes import auth,batches,mappings,runs,audit
+from src.services.queue import queue
+from src.routes import auth,batches,mappings,runs,audit,acceptances
 from src.middlewares.errors import install_errors
 from src.middlewares.requests import RequestTrace
 @asynccontextmanager
@@ -17,8 +17,13 @@ async def lifespan(app):
  yield
 app=FastAPI(title='见山 · 检验结果迁移核对站',lifespan=lifespan)
 app.add_middleware(RequestTrace);install_errors(app)
-for r in (auth,batches,mappings,runs,audit):app.include_router(r.router)
+for r in (auth,batches,mappings,runs,audit,acceptances):app.include_router(r.router)
 @app.get('/health')
 def health():
  with engine.connect() as c:c.execute(text('SELECT 1'))
- queue.ping();return {'status':'ok'}
+ # Redis 仅作通知流：断线不影响受理，健康检查如实标注但不判失败
+ try:
+  queue.ping();redis_ok=True
+ except Exception:
+  redis_ok=False
+ return {'status':'ok','redis':redis_ok}
